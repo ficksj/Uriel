@@ -1,0 +1,7 @@
+html,body,#root{background:transparent}
+.app-shell{background:radial-gradient(circle at 63% -30%,rgba(255,255,255,.08),transparent 32%),rgba(8,8,8,.86)}
+.topbar{position:relative}
+.drag-handle{position:absolute;inset:0;z-index:0;cursor:grab}
+.drag-handle:active{cursor:grabbing}
+.topbar-content{position:relative;z-index:1;pointer-events:none}
+.topbar-content button,.topbar-content input,.topbar-content select{pointer-events:auto}
