@@ -24,6 +24,8 @@ The application uses an obsidian black and silver monochrome interface designed 
 
 Open the [Releases](../../releases) page and download the latest `Uriel_*_x64-setup.exe` installer.
 
+The project website is available at [ficksj.github.io/Uriel](https://ficksj.github.io/Uriel/).
+
 ## Development
 
 ### Requirements
