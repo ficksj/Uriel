@@ -8,7 +8,10 @@ use zeroize::Zeroizing;
 use std::{sync::Mutex, time::Duration};
 
 #[derive(Default)]
-struct AppState { clipboard_timer: Mutex<Option<tauri::async_runtime::JoinHandle<()>>> }
+struct AppState {
+    clipboard_timer: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    registered_hotkey: Mutex<Option<tauri_plugin_global_shortcut::Shortcut>>,
+}
 
 #[derive(Serialize, Deserialize)]
 struct EncryptedNote { version: u8, salt: String, nonce: String, ciphertext: String }
@@ -65,10 +68,20 @@ fn set_window_always_on_top(window: tauri::WebviewWindow, enabled: bool) -> Resu
 }
 
 #[tauri::command]
-fn register_hotkey(app: tauri::AppHandle) -> Result<(), String> {
+fn register_hotkey(app: tauri::AppHandle, state: State<'_, AppState>, shortcut_text: String) -> Result<(), String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-    let shortcut: Shortcut = "ALT+SPACE".parse::<Shortcut>().map_err(|e| e.to_string())?;
-    app.global_shortcut().on_shortcut(shortcut, move |app, _, event| { if event.state == ShortcutState::Pressed { if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); } } }).map_err(|e| e.to_string())
+    let shortcut: Shortcut = shortcut_text.parse::<Shortcut>().map_err(|e| e.to_string())?;
+    if let Some(previous) = state.registered_hotkey.lock().map_err(|_| "hotkey state unavailable")?.take() {
+        let _ = app.global_shortcut().unregister(previous);
+    }
+    let callback_shortcut = shortcut.clone();
+    app.global_shortcut().on_shortcut(callback_shortcut, move |app, _, event| {
+        if event.state == ShortcutState::Pressed {
+            if let Some(window) = app.get_webview_window("main") { let _ = window.show(); let _ = window.set_focus(); }
+        }
+    }).map_err(|e| e.to_string())?;
+    *state.registered_hotkey.lock().map_err(|_| "hotkey state unavailable")? = Some(shortcut);
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

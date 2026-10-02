@@ -9,8 +9,8 @@ const starter: Note = { id: 'first', title: 'Untitled note', content: 'curl -H "
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const copyText = {
-  ru: { encrypted: 'ЗАЩИЩЕНО', newNote: 'Новая заметка', notes: 'ЗАМЕТКИ', local: 'Только локально', saved: 'Сохранено в зашифрованной памяти', destroy: 'Уничтожить сейчас', copy: 'Зашифровать и скопировать', copied: 'Скопировано · очистка через 30 с', lifetime: 'ВРЕМЯ ЖИЗНИ', settings: 'Настройки', language: 'Язык', alwaysTop: 'Поверх всех окон', shortcut: 'Глобальная комбинация', close: 'Закрыть', empty: 'Заметка уничтожена', cleared: 'Память и зашифрованное хранилище очищены', newAfter: 'Новая заметка' },
-  en: { encrypted: 'ENCRYPTED', newNote: 'New note', notes: 'NOTES', local: 'Local only', saved: 'Saved to encrypted memory', destroy: 'Destroy now', copy: 'Encrypt & copy', copied: 'Copied · clears in 30s', lifetime: 'LIFETIME', settings: 'Settings', language: 'Language', alwaysTop: 'Always on top', shortcut: 'Global shortcut', close: 'Close', empty: 'Note destroyed', cleared: 'Memory and encrypted storage cleared', newAfter: 'New note' },
+  ru: { encrypted: 'ЗАЩИЩЕНО', newNote: 'Новая заметка', notes: 'ЗАМЕТКИ', local: 'Только локально', saved: 'Сохранено в зашифрованной памяти', destroy: 'Уничтожить сейчас', copy: 'Зашифровать и скопировать', copied: 'Скопировано · очистка через 30 с', lifetime: 'ВРЕМЯ ЖИЗНИ', settings: 'Настройки', language: 'Язык', alwaysTop: 'Поверх всех окон', shortcut: 'Глобальная комбинация', shortcutHint: 'Нажмите сочетание клавиш', close: 'Закрыть', empty: 'Заметка уничтожена', cleared: 'Память и зашифрованное хранилище очищены', newAfter: 'Новая заметка' },
+  en: { encrypted: 'ENCRYPTED', newNote: 'New note', notes: 'NOTES', local: 'Local only', saved: 'Saved to encrypted memory', destroy: 'Destroy now', copy: 'Encrypt & copy', copied: 'Copied · clears in 30s', lifetime: 'LIFETIME', settings: 'Settings', language: 'Language', alwaysTop: 'Always on top', shortcut: 'Global shortcut', shortcutHint: 'Press a key combination', close: 'Close', empty: 'Note destroyed', cleared: 'Memory and encrypted storage cleared', newAfter: 'New note' },
 } as const;
 
 function App() {
@@ -19,6 +19,8 @@ function App() {
   const [pinned, setPinned] = useState(true);
   const [copied, setCopied] = useState(false);
   const [burned, setBurned] = useState(false);
+  const [hotkey, setHotkey] = useState(() => localStorage.getItem('uriel-hotkey') || 'ALT+SPACE');
+  const [recordingHotkey, setRecordingHotkey] = useState(false);
   const [language, setLanguage] = useState<'ru' | 'en'>('ru');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -26,7 +28,7 @@ function App() {
   const t = copyText[language];
 
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
-  useEffect(() => { if (isTauri()) { invoke('register_hotkey').catch(() => undefined); } }, []);
+  useEffect(() => { if (isTauri()) { invoke('register_hotkey', { shortcutText: hotkey }).catch(() => undefined); } }, [hotkey]);
 
   const remaining = Math.max(0, active.expiresAt - now);
   const timeLeft = active.ttl === 'copy' ? 'Burn on copy' : `${String(Math.floor(remaining / 3600000)).padStart(2, '0')}:${String(Math.floor((remaining % 3600000) / 60000)).padStart(2, '0')}:${String(Math.floor((remaining % 60000) / 1000)).padStart(2, '0')}`;
@@ -48,8 +50,33 @@ function App() {
     setCopied(true); window.setTimeout(() => setCopied(false), 30000);
     if (active.ttl === 'copy') destroyNote();
   };
-  const destroyNote = () => { if (isTauri()) invoke('destroy_note', { noteId: active.id }).catch(() => undefined); setNotes((items) => items.filter((note) => note.id !== activeId)); setBurned(true); };
-  const restore = () => { const note = { ...starter, id: 'restored', content: '', title: 'Untitled note' }; setNotes([note]); setActiveId(note.id); setBurned(false); };
+  const destroyNote = () => {
+    if (isTauri()) invoke('destroy_note', { noteId: active.id }).catch(() => undefined);
+    const id = crypto.randomUUID();
+    const note = { ...starter, id, title: 'Untitled note', content: '', expiresAt: Date.now() + 3600000 };
+    setNotes((items) => [...items.filter((item) => item.id !== activeId), note]);
+    setActiveId(id);
+    setBurned(false);
+    setCopied(false);
+  };
+  const restore = () => { const note = { ...starter, id: crypto.randomUUID(), content: '', title: 'Untitled note' }; setNotes([note]); setActiveId(note.id); setBurned(false); };
+  const captureHotkey = async (event: React.KeyboardEvent<HTMLInputElement>) => {
+    event.preventDefault();
+    if (event.key === 'Backspace' || event.key === 'Delete') return;
+    const parts: string[] = [];
+    if (event.ctrlKey) parts.push('CTRL');
+    if (event.altKey) parts.push('ALT');
+    if (event.shiftKey) parts.push('SHIFT');
+    if (event.metaKey) parts.push('SUPER');
+    const keyMap: Record<string, string> = { ' ': 'SPACE', Escape: 'ESC', Enter: 'ENTER', ArrowUp: 'UP', ArrowDown: 'DOWN', ArrowLeft: 'LEFT', ArrowRight: 'RIGHT' };
+    const key = keyMap[event.key] || (event.key.length === 1 ? event.key.toUpperCase() : event.key.toUpperCase());
+    if (!['CONTROL', 'ALT', 'SHIFT', 'META'].includes(key)) parts.push(key);
+    if (parts.length < 2) return;
+    const next = parts.join('+');
+    setHotkey(next);
+    localStorage.setItem('uriel-hotkey', next);
+    setRecordingHotkey(false);
+  };
   const startWindowDrag = (event: React.MouseEvent<HTMLElement>) => {
     if (event.button !== 0 || !isTauri()) return;
     void getCurrentWindow().startDragging().catch((error) => console.error('Uriel window drag failed', error));
@@ -85,7 +112,7 @@ function App() {
     </div>
     <div className="divider" />
     <footer className="bottom-bar"><div className="lifetime"><div className="lifetime-label"><span><span className="tiny-pulse" /> {t.lifetime}</span><b>{timeLeft}</b></div><div className="progress-track"><span style={{ width: `${progress}%` }} /></div></div><div className="actions"><button className="ghost-btn" onClick={destroyNote}><Flame size={15} /> {t.destroy}</button><button className="copy-btn" onClick={copyNote}>{copied ? <Check size={16} /> : <Copy size={15} />} {copied ? t.copied : t.copy}</button></div></footer>
-    {settingsOpen && <div className="settings-popover"><div className="settings-head"><strong>{t.settings}</strong><button className="icon-btn" onClick={() => setSettingsOpen(false)} aria-label={t.close}><X size={15} /></button></div><label className="setting-row"><span><Languages size={15} /> {t.language}</span><button className="setting-select" onClick={() => setLanguage(language === 'ru' ? 'en' : 'ru')}>{language === 'ru' ? 'Русский' : 'English'} <ChevronDown size={13} /></button></label><label className="setting-row"><span><Pin size={15} /> {t.alwaysTop}</span><button className={`switch ${pinned ? 'on' : ''}`} onClick={togglePinned} aria-label={t.alwaysTop}><i /></button></label><div className="setting-row shortcut-row"><span><LockKeyhole size={15} /> {t.shortcut}</span><kbd>Alt + Space</kbd></div></div>}
+    {settingsOpen && <div className="settings-popover"><div className="settings-head"><strong>{t.settings}</strong><button className="icon-btn" onClick={() => setSettingsOpen(false)} aria-label={t.close}><X size={15} /></button></div><label className="setting-row"><span><Languages size={15} /> {t.language}</span><button className="setting-select" onClick={() => setLanguage(language === 'ru' ? 'en' : 'ru')}>{language === 'ru' ? 'Русский' : 'English'} <ChevronDown size={13} /></button></label><label className="setting-row"><span><Pin size={15} /> {t.alwaysTop}</span><button className={`switch ${pinned ? 'on' : ''}`} onClick={togglePinned} aria-label={t.alwaysTop}><i /></button></label><div className="setting-row shortcut-row"><span><LockKeyhole size={15} /> {t.shortcut}</span><input className={`hotkey-input ${recordingHotkey ? 'recording' : ''}`} value={recordingHotkey ? t.shortcutHint : hotkey.replace(/\+/g, ' + ')} onFocus={() => setRecordingHotkey(true)} onBlur={() => setRecordingHotkey(false)} onKeyDown={captureHotkey} readOnly aria-label={t.shortcut} /></div></div>}
     {copied && <div className="toast"><Check size={14} /> Plaintext copied. Clipboard clears in 30 seconds.</div>}
   </main>;
 }
